@@ -49,9 +49,15 @@ jobs:
         run: |
           npm run lint
 
-      # TODO: add supply chain scanning
+      - name: Supply chain scanning
+        working-directory: app
+        run: |
+          npm audit
 
-      # TODO: add unit testing
+      - name: Unit testing
+        working-directory: app
+        run: |
+          npm test
 
       # TODO: add cloudformation linting
 
