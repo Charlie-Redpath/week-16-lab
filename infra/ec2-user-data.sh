@@ -48,7 +48,7 @@ docker run -d \
     nginx
 
 ############################################################
-## 👇👇👇👇👇 application install commands here 👇👇👇👇👇
+# application install commands here 
 
 echo "installing Nodejs using NVM" | tee -a "${logName}"
 curl --silent --location https://rpm.nodesource.com/setup_16.x | bash -

@@ -1,0 +1,190 @@
+Parameters:
+  StudentName:
+    Type: String
+  Data:
+    Type: String
+
+Resources:
+# VPC
+  MyTestVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/22
+      Tags:
+        - Key: Name
+          Value: !Sub "${StudentName}-vpc"
+
+# PubSubnet
+  PubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyTestVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: "eu-west-1a"
+      Tags:
+        - Key: Name
+          Value: !Sub "${StudentName}-pub-subnet"
+
+# PrivSubnet
+  PrivSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref MyTestVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: "eu-west-1a"
+      Tags:
+        - Key: Name
+          Value: !Sub "${StudentName}-priv-subnet"
+
+# InternetGateway:
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub "${StudentName}-internet-gateway"
+
+# VPC Gateway Attachement
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref MyTestVPC
+
+#EIP
+  EIP:
+    Type: AWS::EC2::EIP
+
+
+#NAT Gateway Public
+  NAT:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt EIP.AllocationId
+      SubnetId:
+        Ref: PubSubnet
+
+
+# Route Table Internet Gateway
+  PubRoute:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub "${StudentName}-route-table"
+      VpcId: !Ref MyTestVPC
+
+  PrivRoute:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub "${StudentName}-route-table-private"
+      VpcId: !Ref MyTestVPC
+
+# Public Route
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      RouteTableId: !Ref PubRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      RouteTableId: !Ref PrivRoute
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId:
+        Ref: NAT
+
+# SubnetRouteTableAssociation
+  PubSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PubRoute
+      SubnetId: !Ref PubSubnet
+
+  PrivSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivRoute
+      SubnetId: !Ref PrivSubnet
+
+  # EC2
+  EC2App:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+      KeyName: charlie-redpath-loxley
+      NetworkInterfaces:
+        - PrivateIpAddress: 10.0.1.5
+          SubnetId: !Ref PrivSubnet
+          DeviceIndex: "0"
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          # This script is injected into the AWS vm on creation
+          # and can be used to provision your VM
+          # NB it's run as root, so no need for sudo
+
+          # debug logs are here
+          readonly logName="/var/log/server-setup.log"
+
+          echo "Starting $(date)" | tee -a "${logName}"
+
+          echo "Install required tools" | tee -a "${logName}"
+          yum install -y \
+              docker \
+              iptraf-ng \
+              htop \
+              tmux \
+              vim \
+              curl \
+              git
+
+          # put your own github username here
+          echo "Setting up ssh access keys" | tee -a "${logName}"
+          curl -s https://github.com/jujhars13.keys | tee -a /home/ec2-user/.ssh/authorized_keys
+
+          # add ec2 user to the docker group which allows docket to run without being a super-user
+          usermod -aG docker ec2-user
+
+          # running docker daemon as a service
+          chkconfig docker on
+          service docker start
+
+          echo "Creating rudimentary web page for debugging this VM" | tee -a "${logName}"
+          cat <<EOF >>/home/ec2-user/index.html
+          <html>
+              <body>
+                  <h1>Welcome Warwick WM145 peeps</h1>
+                  <div>We hope you enjoy our debug page</div>
+                  <div id="image"><img src="https://placedog.net/500/280" /></div>
+              </body>
+          </html>
+          EOF
+
+          echo "Starting a debug nginx web server on port 8080" | tee -a "${logName}"
+          docker run -d \
+              --restart always \
+              -v /home/ec2-user/index.html:/usr/share/nginx/html/index.html:ro \
+              -p 8080:80 \
+              nginx
+
+          ############################################################
+          # application install commands here
+
+          echo "installing Nodejs using NVM" | tee -a "${logName}"
+          curl --silent --location https://rpm.nodesource.com/setup_16.x | bash -
+          yum -y install nodejs
+
+          echo "installing application" | tee -a "${logName}"
+          (cd /home/ec2-user && git clone https://github.com/warwick-cybersecurity-WM145-24/week-16-lab.git)
+
+          echo "installing deps and starting application $(date)" | tee -a "${logName}"
+          (cd /home/ec2-user/week-16-lab/app && npm install && DEBUG=* PORT=80 npm start)
+
+      ImageId: ami-06e0ce9d3339cb039

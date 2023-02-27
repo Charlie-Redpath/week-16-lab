@@ -1,7 +1,9 @@
 #!/bin/bash
-# Put your deployment kick off script actions here
 
-if [! aws sts get-caller-identity]; then
-    echo >&2 "aws creds not working"
-    exit 2
-fi
+aws cloudformation deploy \
+    --stack-name "charlie-redpath-loxley-16" \
+    --template-file "/home/csc/GitHub/week-16-lab/infra/arch.yaml" \
+    --capabilities CAPABILITY_IAM \
+    --no-fail-on-empty-changeset \
+    --region "eu-west-1" \
+    --parameter-overrides "file:///home/csc/GitHub/week-16-lab/infra/params.json"
